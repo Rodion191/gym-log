@@ -1,6 +1,6 @@
 'use strict';
 /* ===== Вкладка «Тело»: цель, вес, замеры, фото, сон, боли + подсказки тренера ===== */
-const BODY_TABS = [['goal', 'Цель'], ['weight', 'Вес'], ['measure', 'Замеры'], ['photo', 'Фото'], ['sleep', 'Сон'], ['pain', 'Боли']];
+const BODY_TABS = [['goal', 'Цель'], ['weight', 'Вес'], ['measure', 'Замеры'], ['photo', 'Фото'], ['sleep', 'Сон'], ['cardio', 'Кардио'], ['pain', 'Боли']];
 const GOALS = {mass: 'Набор мышечной массы', cut: 'Снижение веса', maintain: 'Поддержание формы'};
 const MEAS = [['waist', 'Талия'], ['chest', 'Грудь'], ['hips', 'Бёдра'], ['arm', 'Рука (бицепс)'], ['thigh', 'Бедро']];
 const KINDS = {ache: 'ноющая', sharp: 'острая, «стреляющая»', burn: 'жгучая или с онемением', stiff: 'скованность, тянет'};
@@ -11,7 +11,39 @@ const deloadActive = () => !!(D.deload && D.deload.until && D.deload.until >= to
 const dm = d => d.slice(8) + '.' + d.slice(5, 7);
 function ensureBody() {
   D.weights = D.weights || []; D.pains = D.pains || []; D.sleeps = D.sleeps || []; D.measures = D.measures || [];
+  D.cardio = D.cardio || []; D.kcalDays = D.kcalDays || [];
   if (!D.deload) D.deload = {start: null, until: null, last: null};
+}
+function addCardio(d, type, min, kcal) {
+  ensureBody(); min = num(min); kcal = num(kcal);
+  if (!okDate(d) || !(min >= 1 && min <= 600) || !COACH.CARDIO[type]) return false;
+  D.cardio.push({id: uid(), d: d, type: type, min: Math.round(min), kcal: kcal > 0 && kcal <= 5000 ? Math.round(kcal) : null});
+  save(); return true;
+}
+function addKcalDay(d, kcal) {
+  ensureBody(); kcal = num(kcal);
+  if (!okDate(d) || !(kcal >= 1 && kcal <= 5000)) return false;
+  const e = D.kcalDays.find(x => x.d === d);
+  if (e) e.kcal = Math.round(kcal); else D.kcalDays.push({d: d, kcal: Math.round(kcal)});
+  save(); return true;
+}
+function curKg() { const w = bSort(D.weights); return w.length ? w[w.length - 1].kg : 90; }
+function cardioCoach() {
+  const wa = COACH.weightAdvice(D.goal, bSort(D.weights), todayStr());
+  return COACH.cardioAdvice({goal: D.goal, cardio: D.cardio, kcalDays: D.kcalDays, kg: curKg(), today: todayStr(), pains: D.pains, weightLevel: wa && wa.level});
+}
+function cardioView() {
+  const cs = (D.cardio || []).slice().sort((a, b) => b.d.localeCompare(a.d)), adv = cardioCoach();
+  const k = D.kcalDays.find(x => x.d === todayStr());
+  let h = '<div class="card"><b>Записать кардио</b><div class="row" style="margin-top:8px"><input type="date" id="cdate" value="' + todayStr() + '" style="max-width:160px"><select id="ctype">'
+    + Object.keys(COACH.CARDIO).map(x => '<option value="' + x + '">' + COACH.CARDIO[x][0] + '</option>').join('') + '</select></div>'
+    + '<div class="row" style="margin-top:8px"><input id="cmin" inputmode="numeric" placeholder="минут"><input id="ckcal" inputmode="numeric" placeholder="ккал с часов"></div>'
+    + '<button class="btn pri block" data-act="csave">Записать кардио</button><div class="muted">Для силовой тренировки выберите «Силовая тренировка» и впишите её калории с часов (в недельные минуты кардио она не входит). Если не вписать, приложение прикинет их по вашему весу (приблизительно).</div></div>';
+  h += '<div class="card"><b>Активные калории за сегодня (с часов)</b><div class="row" style="margin-top:8px"><input id="kday" inputmode="numeric" placeholder="например, 420" value="' + (k ? k.kcal : '') + '"><button class="btn" data-act="ksave">' + (k ? 'Изменить' : 'Записать') + '</button></div>'
+    + '<div class="muted">Откройте «Активность» на Apple Watch или «Здоровье» на iPhone и впишите «Активные ккал». Приложение скажет, хватает ли и сколько кардио добавить.</div></div>';
+  h += tipHTML(adv) || '<div class="muted">Запишите калории или кардио — и тренер подскажет, сколько ещё добавить.</div>';
+  if (cs.length) h += '<div class="card" style="padding:0 6px">' + cs.slice(0, 30).map(c => '<div class="li"><div class="sp"><b>' + esc(dFmt(c.d)) + ' · ' + esc(COACH.CARDIO[c.type][0]) + '</b><div class="muted">' + c.min + ' мин' + (c.kcal ? ' · ' + c.kcal + ' ккал' : '') + '</div></div><button class="x" data-act="cdel" data-id="' + esc(c.id) + '" aria-label="Удалить кардио">✕</button></div>').join('') + '</div>';
+  return h;
 }
 const bSort = arr => (arr || []).slice().sort((a, b) => a.d.localeCompare(b.d));
 const okDate = d => /^\d{4}-\d\d-\d\d$/.test(d || '');
@@ -46,6 +78,8 @@ function mergeBody(o) {
   (Array.isArray(o.pains) ? o.pains : []).forEach(p => { if (p && p.id && okDate(p.d) && !D.pains.some(x => x.id === p.id)) D.pains.push(p); });
   (Array.isArray(o.sleeps) ? o.sleeps : []).forEach(s => { if (s && okDate(s.d) && s.h > 0 && s.h <= 16 && !D.sleeps.some(x => x.d === s.d)) D.sleeps.push({d: s.d, h: +s.h, q: s.q || null}); });
   (Array.isArray(o.measures) ? o.measures : []).forEach(m => { if (m && okDate(m.d) && !D.measures.some(x => x.d === m.d)) D.measures.push(m); });
+  (Array.isArray(o.cardio) ? o.cardio : []).forEach(c => { if (c && c.id && okDate(c.d) && COACH.CARDIO[c.type] && c.min > 0 && !D.cardio.some(x => x.id === c.id)) D.cardio.push(c); });
+  (Array.isArray(o.kcalDays) ? o.kcalDays : []).forEach(k => { if (k && okDate(k.d) && k.kcal > 0 && !D.kcalDays.some(x => x.d === k.d)) D.kcalDays.push({d: k.d, kcal: +k.kcal}); });
   if (o.goal && o.goal.type && !D.goal) D.goal = o.goal;
 }
 function applyUrlParams() {
@@ -53,6 +87,8 @@ function applyUrlParams() {
     const sp = new URLSearchParams(location.search), d = okDate(sp.get('date')) ? sp.get('date') : todayStr(), msg = [];
     if (sp.has('sleep') && addSleep(d, sp.get('sleep'), null)) msg.push('сон ' + fmtN(num(sp.get('sleep'))) + ' ч');
     if (sp.has('weight') && addWeight(d, sp.get('weight'))) msg.push('вес ' + fmtN(num(sp.get('weight'))) + ' кг');
+    if (sp.has('kcal') && addKcalDay(d, sp.get('kcal'))) msg.push('активные ' + Math.round(num(sp.get('kcal'))) + ' ккал');
+    if (sp.has('cardio') && addCardio(d, 'other', sp.get('cardio'), sp.get('cardiokcal'))) msg.push('кардио ' + Math.round(num(sp.get('cardio'))) + ' мин');
     if (msg.length) { toast('Записано из ссылки: ' + msg.join(', '), 4000); history.replaceState(null, '', location.pathname); }
   } catch (e) {}
 }
@@ -81,7 +117,7 @@ function bodyView() {
   let h = '<h1>Тело и самочувствие</h1><div style="margin:2px 0 10px">'
     + BODY_TABS.map(([k, l]) => '<button class="btn sm" style="margin:3px 4px 3px 0;' + (cur === k ? on : '') + '" data-act="btab" data-k="' + k + '">' + l + '</button>').join('') + '</div>';
   if (cur === 'goal') h += goalView(); else if (cur === 'weight') h += weightView(); else if (cur === 'measure') h += measureView();
-  else if (cur === 'photo') h += photoView(); else if (cur === 'sleep') h += sleepView(); else h += painView();
+  else if (cur === 'photo') h += photoView(); else if (cur === 'sleep') h += sleepView(); else if (cur === 'cardio') h += cardioView(); else h += painView();
   return h;
 }
 function tipHTML(adv) { return adv ? '<div class="tip ' + adv.level + '">' + esc(adv.text) + '</div>' : ''; }
@@ -178,7 +214,13 @@ function painAdviceModal(p, adv) {
 
 /* ---------- фото (хранятся только в телефоне, IndexedDB) ---------- */
 let _urls = [];
-function pdb() { return new Promise((res, rej) => { const r = indexedDB.open('gymlog-photos', 1); r.onupgradeneeded = () => r.result.createObjectStore('p', {keyPath: 'id'}); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+let _pdb = null; /* одно общее подключение к базе фото (раньше каждый вызов открывал новое и не закрывал) */
+function pdb() {
+  if (_pdb) return _pdb;
+  _pdb = new Promise((res, rej) => { const r = indexedDB.open('gymlog-photos', 1); r.onupgradeneeded = () => r.result.createObjectStore('p', {keyPath: 'id'}); r.onsuccess = () => { r.result.onversionchange = () => { r.result.close(); _pdb = null; }; res(r.result); }; r.onerror = () => rej(r.error); r.onblocked = () => {}; });
+  _pdb.catch(() => { _pdb = null; });
+  return _pdb;
+}
 async function pAll() { const db = await pdb(); return new Promise((res, rej) => { const q = db.transaction('p').objectStore('p').getAll(); q.onsuccess = () => res(q.result || []); q.onerror = () => rej(q.error); }); }
 async function pPut(o) { const db = await pdb(); return new Promise((res, rej) => { const tx = db.transaction('p', 'readwrite'); tx.objectStore('p').put(o); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
 async function pDel(id) { const db = await pdb(); return new Promise((res, rej) => { const tx = db.transaction('p', 'readwrite'); tx.objectStore('p').delete(id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
@@ -260,6 +302,7 @@ function coachNoticesHTML() {
   else if (st.state === 'due' || st.state === 'soon') h += '<div class="tip warn"><b>' + (st.state === 'due' ? 'Пора на разгрузочную неделю' : 'Скоро нужна разгрузочная неделя') + '.</b> ' + esc(st.reasons.join('; ')) + '. Неделя с разгрузкой: вдвое меньше подходов и на ~10% легче, без отказа. <button class="btn sm" data-act="dstart">Начать разгрузочную неделю</button></div>';
   const sa = COACH.sleepAdvice(D.sleeps, today); if (sa && sa.level !== 'ok') h += tipHTML(sa);
   const wa = COACH.weightAdvice(D.goal, bSort(D.weights), today); if (wa && wa.level !== 'ok') h += tipHTML(wa);
+  if (D.goal && D.goal.type === 'cut' || D.cardio.length || D.kcalDays.length) { const ca = cardioCoach(); if (ca && ca.level !== 'ok') h += tipHTML(ca) + '<button class="btn sm" data-act="gocardio" style="margin-bottom:6px">Записать кардио / ккал</button>'; }
   const act = D.pains.filter(p => p.status !== 'resolved' && p.level >= 3 && COACH.daysBetween(p.d, today) >= 0 && COACH.daysBetween(p.d, today) <= 10);
   if (act.length) h += '<div class="tip warn"><b>Недавние боли:</b> ' + act.map(p => esc((COACH.AREAS[p.area] || p.area) + ' ' + p.level + '/10')).join(', ') + '. Упражнения, которые её нагружают, помечены в тренировке.</div>';
   const lastS = sortedSessions().find(s => s.entries.some(e => e.sets.length));
@@ -270,6 +313,7 @@ function coachNoticesHTML() {
 /* ---------- обработка нажатий вкладки «Тело» (возвращает true, если обработано) ---------- */
 function bodyAct(act, t) {
   switch (act) {
+    case 'gocardio': UI.body = 'cardio'; UI.tab = 'body'; UI.edit = null; render(); window.scrollTo(0, 0); return true;
     case 'btab': UI.body = t.dataset.k; render(); return true;
     case 'gsave': {
       const ws = bSort(D.weights), last = ws[ws.length - 1], target = num($('gtarget').value);
@@ -291,6 +335,12 @@ function bodyAct(act, t) {
       return true;
     }
     case 'sdel': if (confirm('Удалить запись сна?')) { D.sleeps = D.sleeps.filter(x => x.d !== t.dataset.d); save(); render(); } return true;
+    case 'csave': {
+      if (addCardio($('cdate').value || todayStr(), $('ctype').value, $('cmin').value, $('ckcal').value)) { render(); toast('Кардио записано'); } else toast('Введите минуты, например 20');
+      return true;
+    }
+    case 'cdel': if (confirm('Удалить запись кардио?')) { D.cardio = D.cardio.filter(x => x.id !== t.dataset.id); save(); render(); } return true;
+    case 'ksave': { if (addKcalDay(todayStr(), $('kday').value)) { render(); toast('Калории записаны'); } else toast('Введите число ккал, например 420'); return true; }
     case 'psave': { const r = addPain(readPainForm()); render(); painAdviceModal(r.p, r.adv); return true; }
     case 'popen': {
       $('modalhost').innerHTML = '<div class="modal" data-act="closepick"><div class="sheet"><div class="row"><h2 style="margin:0" class="sp">Что болит?</h2><button class="btn sm" data-act="closepick">Закрыть</button></div>' + painFormHTML('') + '</div></div>';

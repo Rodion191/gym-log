@@ -45,6 +45,9 @@ input,select,textarea{font:inherit;font-size:16px;color:var(--ink);background:va
 .st input{text-align:center;padding:9px 2px;height:42px;min-width:0}
 .wbtn{height:42px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink3);font-weight:700;padding:0}
 .wbtn.on{background:#e8b400;color:#000;border-color:#e8b400}
+.rirrow{display:flex;gap:5px;align-items:center;margin:-2px 0 8px 26px;flex-wrap:wrap;font-size:13px}
+.rb{height:34px;min-width:38px;padding:0 9px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink2,var(--ink));font-size:13px}
+.rb.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 .x{border:0;background:none;color:var(--ink3);font-size:20px;height:42px}
 .tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding:6px 6px calc(env(safe-area-inset-bottom) + 6px)}
 .tabs button{flex:1;border:0;background:none;color:var(--ink3);font:inherit;font-size:12px;font-weight:600;padding:6px 0}
@@ -53,6 +56,9 @@ input,select,textarea{font:inherit;font-size:16px;color:var(--ink);background:va
 .toast{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 78px);background:#16161a;color:#fff;border-radius:12px;padding:12px 14px;z-index:30;text-align:center;font-weight:600;max-width:520px;margin:0 auto}
 .timer{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom) + 74px);background:var(--blue);color:#fff;border:0;border-radius:24px;padding:11px 16px;font:inherit;font-weight:700;z-index:20;box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .timer.done{background:var(--bad)}
+.timer.idle{background:var(--card);color:var(--ink);border:2px solid var(--blue)}
+.tmenu{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom) + 128px);display:flex;gap:6px;z-index:21}
+.tmenu button{border:0;border-radius:18px;padding:9px 13px;font:inherit;font-weight:700;background:var(--card);color:var(--ink);box-shadow:0 2px 8px rgba(0,0,0,.35)}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40;display:flex;align-items:flex-end}
 .sheet{background:var(--bg);width:100%;max-width:560px;margin:0 auto;border-radius:18px 18px 0 0;padding:14px 12px calc(env(safe-area-inset-bottom) + 14px);max-height:85vh;overflow:auto}
 .li{display:flex;align-items:center;gap:8px;padding:12px 8px;border-bottom:1px solid var(--line)}
@@ -123,9 +129,9 @@ const TPL = {
 /* ====================== данные ====================== */
 const KEY = 'gymlog.v1';
 let mem = null;
-function fresh() { return {v:1, sessions:[], custom:{}, lastBackup:null, restSec:90, lastGym:1, equip:{}, weights:[], pains:[], sleeps:[], measures:[], goal:null, deload:{start:null, until:null, last:null}, repMin:8, repMax:12}; }
+function fresh() { return {v:1, sessions:[], custom:{}, lastBackup:null, restSec:180, restV:2, lastGym:1, equip:{}, weights:[], pains:[], sleeps:[], measures:[], goal:null, deload:{start:null, until:null, last:null}, repMin:8, repMax:12}; }
 function loadData() {
-  try { const t = localStorage.getItem(KEY); if (t) return Object.assign(fresh(), JSON.parse(t)); } catch(e) {}
+  try { const t = localStorage.getItem(KEY); if (t) { const o = Object.assign(fresh(), JSON.parse(t)); if (o.restV !== 2) { o.restSec = 180; o.restV = 2; } return o; } } catch(e) {}
   return mem || fresh();
 }
 let D = loadData();
@@ -165,6 +171,24 @@ function prevFor(name, gym, sid, date) {
   for (const s of list) { const en = s.entries.find(e => entryMatches(e, name, gym) && work(e).length); if (en) return {date:s.date, en}; }
   return null;
 }
+function histFor(name, gym, sid, date, n) {
+  const out = [];
+  for (const s of sortedSessions()) {
+    if (s.id === sid || s.date > date) continue;
+    const en = s.entries.find(e => entryMatches(e, name, gym) && work(e).length);
+    if (en) { out.push({d:s.date, sets:work(en), note:en.note||''}); if (out.length >= (n||5)) break; }
+  }
+  return out;
+}
+function planFor(s, en) {
+  const k = kindOf(en.ex), gym = en.gym || s.gym || 1;
+  const hist = histFor(en.ex, gym, s.id, s.date, 5);
+  const alt = (!hist.length && isGS(en.ex)) ? histFor(en.ex, gym === 1 ? 2 : 1, s.id, s.date, 1) : [];
+  const sl = (D.sleeps||[]).find(x => x.d === s.date);
+  let hard = 0;
+  s.entries.forEach(x => { if (x !== en && x.sets.length && x.ex !== en.ex) { const a = (EXDB.find(e => dbName(e) === x.ex)||{}).pm, b = (EXDB.find(e => dbName(e) === en.ex)||{}).pm; if (a && b && a.join() === b.join()) hard += work(x).filter(q => q.rir === undefined || q.rir <= 2).length; } });
+  return COACH.plan({name:en.ex, kind:k, hist:hist, alt:alt, today:s.date, range:RANGE(), deload:deloadActive(), pains:D.pains, sleepH: sl ? sl.h : null, sessionHard:hard});
+}
 function bestBefore(name, gym, sid) {
   let b = 0;
   D.sessions.forEach(s => { if (s.id === sid) return; s.entries.forEach(en => { if (entryMatches(en,name,gym)) { const t = topOf(en); if (t && t.v > b) b = t.v; } }); });
@@ -185,21 +209,22 @@ function toast(msg, ms=2600) {
   const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; $('toasthost').appendChild(el);
   setTimeout(() => el.remove(), ms);
 }
-function curSession() { return UI.edit ? findS(UI.edit) : D.sessions.find(s => s.date === todayStr()); }
+function curSession() { return UI.edit ? findS(UI.edit) : D.sessions.find(s => s.date === todayStr() && !s.done); }
 
 function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === UI.tab));
   let h = '';
   if (UI.edit) h = editorView(findS(UI.edit), true);
-  else if (UI.tab === 'today') { const s = D.sessions.find(x => x.date === todayStr()); h = s ? editorView(s, false) : startView(); }
+  else if (UI.tab === 'today') { const s = D.sessions.find(x => x.date === todayStr() && !x.done); h = s ? editorView(s, false) : startView(); }
   else if (UI.tab === 'hist') h = histView();
   else if (UI.tab === 'base') h = baseView();
   else if (UI.tab === 'prog') h = progView();
   else if (UI.tab === 'body') h = bodyView();
   else h = moreView();
   $('view').innerHTML = (saveFail ? '<div class="banner">Не удалось сохранить на телефоне (приватный режим или нет места). Сделайте резервную копию во вкладке «Ещё».</div>' : '') + h;
-  const inWorkout = !!UI.edit || (UI.tab === 'today' && D.sessions.some(x => x.date === todayStr()));
+  const inWorkout = !!UI.edit || (UI.tab === 'today' && D.sessions.some(x => x.date === todayStr() && !x.done));
   $('timerhost').style.display = inWorkout ? '' : 'none';
+  tick();
   if (UI.tab === 'prog' && !UI.edit) drawProg();
   if (UI.tab === 'body' && !UI.edit && UI.body === 'photo') loadPhotos();
 }
@@ -220,6 +245,9 @@ function startView() {
   const last = sortedSessions()[0];
   const days = Math.floor((new Date(todayStr()) - new Date(last ? last.date : todayStr()))/86400000);
   let h = '<h1>Начать тренировку</h1>' + noticesHTML();
+  D.sessions.filter(x => x.date === todayStr() && x.done).forEach(x => {
+    h += '<div class="tip ok"><b>✓ Сегодня уже записана тренировка</b> (подходов: ' + x.entries.reduce((a, e) => a + work(e).length, 0) + ', поднято ' + fmtN(tonnage(x)) + ' кг). Ниже можно начать ещё одну. <button class="btn sm" data-act="open" data-id="' + x.id + '">Открыть и поправить</button></div>';
+  });
   if (!D.sessions.length) h += '<div class="card" style="border-color:var(--blue)"><b>Как это работает</b><ol class="how"><li>Если у вас есть файл с историей тренировок, загрузите его: «Ещё» → «Загрузить историю».</li><li>Ниже выберите зал и тренировку.</li><li>Записывайте подходы: вес и повторы. Всё сохраняется на телефоне само.</li></ol><button class="btn block" data-act="gotomore">Загрузить историю…</button></div>';
   h += (last ? '<div class="muted" style="margin:-6px 2px 8px">Последняя тренировка: '+esc(dFmt(last.date))+' ('+(days === 0 ? 'сегодня' : days+' дн. назад')+')</div>' : '')
     + '<div class="card"><div class="muted" style="margin-bottom:6px">1. В каком вы зале?</div><div class="seg" id="gymseg">'
@@ -274,8 +302,11 @@ function entryCard(s, en, i) {
     + '<button class="btn sm danger" data-act="rmex" data-i="'+i+'">Убрать</button></div>';
   h += '<div class="prev">'+(pv ? 'Прошлый раз ('+esc(pv.date.slice(8)+'.'+pv.date.slice(5,7))+'): <b>'+esc(setsTxt(pv.en))+'</b>' : 'Раньше не делали — это первая запись')+'</div>';
   const prevSets = pv ? work(pv.en) : null;
-  h += '<div class="tip">🎯 '+esc(COACH.nextTarget(prevSets, k, RANGE(), deloadActive()).text)+'</div>';
-  COACH.painWarnFor(D.pains, en.ex, todayStr()).slice(0, 1).forEach(p => { h += '<div class="tip warn">⚠ Недавно болело: '+esc(COACH.AREAS[p.area] || p.area)+' ('+p.level+'/10). Начните легче, остановитесь при боли или замените упражнение.</div>'; });
+  const pl = planFor(s, en);
+  h += '<div class="tip '+pl.level+'"><b>🎯 '+esc(pl.headline)+'</b>'
+    + (pl.warm ? '<div class="muted">'+esc(pl.warm)+'</div>' : '')
+    + (pl.reasons.length ? '<details><summary class="muted">Почему так</summary>'+pl.reasons.map(x => '<div style="margin-top:4px">'+esc(x)+'</div>').join('')+'</details>' : '')
+    + '</div>';
   if (en.sets.length) h += '<div class="set head"><span></span><span>'+(k==='band' ? '' : WLAB[k])+'</span><span>Повторы</span><span>Разм.</span><span></span></div>';
   en.sets.forEach((x, j) => {
     const w = k==='band' ? '<span class="muted" style="text-align:center;font-size:13px">без веса</span>' : stepper('w', i, j, x.w, k==='load'||k==='side' ? 2.5 : 1);
@@ -283,8 +314,11 @@ function entryCard(s, en, i) {
       + w + stepper('r', i, j, x.r, 1)
       + '<button class="wbtn '+(x.t==='w'?'on':'')+'" data-act="warm" data-i="'+i+'" data-j="'+j+'" title="Отметить как разминку (не идёт в статистику)" aria-label="Разминка">'+(x.t==='w'?'☑':'☐')+'</button>'
       + '<button class="x" data-act="rmset" data-i="'+i+'" data-j="'+j+'" aria-label="Убрать подход" title="Убрать подход">✕</button></div>';
+    if (x.t !== 'w' && x.r > 0 && k !== 'band') h += '<div class="rirrow"><span class="muted">Запас:</span>'
+      + [[0,'отказ'],[1,'1'],[2,'2'],[3,'3'],[4,'4+']].map(a => '<button class="rb '+(x.rir===a[0]?'on':'')+'" data-act="rir" data-i="'+i+'" data-j="'+j+'" data-v="'+a[0]+'">'+a[1]+'</button>').join('')
+      + '<button class="rb '+(x.dirty?'on':'')+'" data-act="dirty" data-i="'+i+'" data-j="'+j+'">грязно</button></div>';
   });
-  if (UI.last && UI.last.sid === s.id && UI.last.i === i && en.sets[UI.last.j]) h += tipHTML(COACH.setAdvice({kind:k, j:UI.last.j, sets:en.sets, prev:prevSets, range:RANGE()}));
+  if (UI.last && UI.last.sid === s.id && UI.last.i === i && en.sets[UI.last.j]) h += tipHTML(COACH.setAdvice({kind:k, j:UI.last.j, sets:en.sets, prev:prevSets, plan:pl, note:en.note, range:RANGE()}));
   h += '<div class="row" style="margin-top:6px"><button class="btn sm" data-act="addset" data-i="'+i+'">+ подход</button>'
     + '<input data-f="note" data-i="'+i+'" value="'+esc(en.note||'')+'" placeholder="Заметка: отказ, боль, раскачка…" style="flex:1"></div></div>';
   return h;
@@ -435,7 +469,7 @@ function moreView() {
     + '<div class="muted" style="margin-top:8px">Все подсказки считаются в самом приложении по простым правилам (файл coach.js), без интернета и без ИИ. Они справочные и не заменяют тренера или врача.</div>'
     + (deloadActive() ? '<button class="btn block" data-act="dend">Закончить разгрузочную неделю</button>' : '<button class="btn block" data-act="dstart">Начать разгрузочную неделю сейчас</button>')
     + '</div>'
-    + '<div class="card"><h2 style="margin-top:0">Таймер отдыха</h2><div class="row"><input id="restsec" inputmode="numeric" value="'+D.restSec+'" style="max-width:90px"><span class="muted">секунд</span></div><label class="row muted" style="margin-top:8px"><input type="checkbox" id="autorest" style="width:auto"'+(D.autoRest !== false ? ' checked' : '')+'> Запускать таймер сам, когда я добавляю следующий подход</label></div>'
+    + '<div class="card"><h2 style="margin-top:0">Таймер отдыха</h2><div class="row"><input id="restsec" inputmode="numeric" value="'+D.restSec+'" style="max-width:90px"><span class="muted">секунд</span></div><label class="row muted" style="margin-top:8px"><input type="checkbox" id="autorest" style="width:auto"'+(D.autoRest !== false ? ' checked' : '')+'> Запускать таймер сам, когда я внёс повторы или «запас» сделанного подхода</label></div>'
     + usageHTML()
     + '<div class="card"><button class="btn danger block" data-act="wipe">Стереть все данные на телефоне</button></div>'
     + '<p class="muted">Журнал зала · работает без интернета · данные не уходят на сервер</p>';
@@ -464,7 +498,7 @@ function importText(text) {
   const hasBody = extra && typeof extra === 'object' && ['pains', 'sleeps', 'measures'].some(k => Array.isArray(extra[k]) && extra[k].length);
   if (!sessions.length && !weights.length && !hasBody) { toast('В файле не нашлось тренировок'); return; }
   const have = new Set(D.sessions.map(s => s.id)); let added = 0, addedW = 0;
-  sessions.forEach(s => { if (s && s.id && s.date && Array.isArray(s.entries) && !have.has(s.id)) { D.sessions.push(s); added++; } });
+  sessions.forEach(s => { if (s && s.id && s.date && Array.isArray(s.entries) && !have.has(s.id)) { if (s.done === undefined && String(s.id).indexOf('imp-') === 0) s.done = true; D.sessions.push(s); added++; } });
   D.weights = D.weights || [];
   weights.forEach(w => { if (w && /^\d{4}-\d\d-\d\d$/.test(w.d || '') && w.kg >= 30 && w.kg <= 300 && !D.weights.some(x => x.d === w.d)) { D.weights.push({d:w.d, kg:+w.kg}); addedW++; } });
   Object.assign(D.custom, custom); mergeBody(extra); save(); render();
@@ -489,14 +523,38 @@ async function doCsv() {
 /* ====================== таймер отдыха ====================== */
 let tmr = null;
 function beep() { try { const c = new (window.AudioContext||window.webkitAudioContext)(), o = c.createOscillator(), g = c.createGain(); o.connect(g); g.connect(c.destination); o.frequency.value = 880; g.gain.value = 0.2; o.start(); setTimeout(() => { o.stop(); c.close(); }, 450); } catch(e) {} if (navigator.vibrate) navigator.vibrate(300); }
-function startRest() { UI.rest = Date.now() + D.restSec*1000; clearInterval(tmr); tmr = setInterval(tick, 250); tick(); }
+function startRest(sec) { UI.rest = Date.now() + (sec || D.restSec) * 1000; UI.pause = 0; UI.tmenu = false; clearInterval(tmr); tmr = setInterval(tick, 250); tick(); }
+function mmss(n) { n = Math.max(0, Math.ceil(n)); return Math.floor(n/60) + ':' + pad(n%60); }
+// кнопка таймера: всегда на экране тренировки; перерисовывается только при смене вида, чтобы нажатие не терялось
 function tick() {
-  const left = Math.ceil((UI.rest - Date.now())/1000), host = $('timerhost');
-  if (!UI.rest) { host.innerHTML = ''; return; }
-  if (left <= 0) { host.innerHTML = '<button class="timer done" data-act="timerstop">Отдых закончен ✓</button>'; if (UI.rest > 0) { beep(); UI.rest = -1; clearInterval(tmr); } return; }
-  host.innerHTML = '<button class="timer" data-act="timerstop">⏱ Отдых '+Math.floor(left/60)+':'+pad(left%60)+' · стоп</button>';
+  const host = $('timerhost'); if (!host) return;
+  let key, label, cls = 'timer', menu = '';
+  if (UI.pause) { key = 'p'; label = '⏸ Пауза ' + mmss(UI.pause / 1000); }
+  else if (!UI.rest) { key = 'i'; cls = 'timer idle'; label = '⏱ Отдых ' + mmss(D.restSec); }
+  else {
+    const left = Math.ceil((UI.rest - Date.now()) / 1000);
+    if (left <= 0) { key = 'd'; cls = 'timer done'; label = 'Отдых закончен ✓ · закрыть'; if (UI.rest > 0) { beep(); UI.rest = -1; clearInterval(tmr); } }
+    else { key = 'r'; label = '⏱ Отдых ' + mmss(left); }
+  }
+  if (UI.rest === -1 && key !== 'd') { key = 'd'; cls = 'timer done'; label = 'Отдых закончен ✓ · закрыть'; }
+  const act = key === 'i' ? 'timerstart' : key === 'd' ? 'timerstop' : 'timermenu';
+  const showMenu = UI.tmenu && (key === 'r' || key === 'p');
+  const k2 = key + (showMenu ? 'm' : '');
+  if (host.dataset.k !== k2) {
+    if (showMenu) menu = '<div class="tmenu"><button data-act="timeradd">+15 с</button><button data-act="timerpause">' + (key === 'p' ? '▶ Дальше' : '⏸ Пауза') + '</button><button data-act="timerstop">Сбросить</button></div>';
+    host.innerHTML = menu + '<button class="' + cls + '" data-act="' + act + '">' + label + '</button>';
+    host.dataset.k = k2;
+  } else { const b = host.querySelector('.timer'); if (b && b.textContent !== label) b.textContent = label; }
 }
-
+// автозапуск: когда внесён результат подхода (повторы или «запас»), один раз на подход и не поверх уже идущего отдыха
+function autoRest(s, i, j) {
+  if (D.autoRest === false) return;
+  const x = s.entries[i] && s.entries[i].sets[j]; if (!x || x.t === 'w' || !(x.r > 0)) return;
+  const key = s.id + ':' + i + ':' + j; if (UI.timed === key) return;
+  UI.timed = key;
+  if (UI.pause || (UI.rest > 0 && UI.rest > Date.now())) return;
+  startRest();
+}
 /* ====================== база упражнений ====================== */
 const EXBYNAME = new Map(); EXDB.forEach(e => { EXBYNAME.set(e.ru, e); e.alias.forEach(a => EXBYNAME.set(a, e)); });
 const EXBYID = new Map(EXDB.map(e => [e.id, e]));
@@ -617,19 +675,21 @@ document.addEventListener('click', e => {
     case 'egym': s.entries[i].gym = (s.entries[i].gym||s.gym||1) === 1 ? 2 : 1; save(); render(); break;
     case 'rmex': if (confirm('Убрать «'+s.entries[i].ex+'» из тренировки?')) { s.entries.splice(i,1); save(); render(); } break;
     case 'rmset': s.entries[i].sets.splice(j,1); save(); render(); break;
+    case 'rir': { const x = s.entries[i].sets[j], v = +t.dataset.v; x.rir = x.rir === v ? undefined : v; UI.last = {sid:s.id, i:i, j:j}; save(); if (x.rir !== undefined) autoRest(s, i, j); render(); break; }
+    case 'dirty': { const x = s.entries[i].sets[j]; x.dirty = x.dirty ? undefined : true; UI.last = {sid:s.id, i:i, j:j}; save(); render(); break; }
     case 'warm': { const x = s.entries[i].sets[j]; x.t = x.t === 'w' ? undefined : 'w'; save(); render(); break; }
     case 'addset': {
       const en = s.entries[i], last = en.sets[en.sets.length-1];
-      const pv = prevFor(en.ex, en.gym||s.gym||1, s.id, s.date), pvs = pv ? work(pv.en)[en.sets.length] || work(pv.en).slice(-1)[0] : null;
-      let src = last || pvs || {w:0, r:0};
-      if (!last && pv) { const tg = COACH.nextTarget(work(pv.en), kindOf(en.ex), RANGE(), deloadActive()); if (tg.w != null && ['add','back','deload'].indexOf(tg.action) >= 0) src = {w:tg.w, r:tg.r}; }
+      const pl = planFor(s, en), nw = en.sets.filter(q => q.t !== 'w').length, tg = pl.targets && pl.targets.length ? (pl.targets[nw] || pl.targets[pl.targets.length-1]) : null;
+      let src = last || {w:0, r:0};
+      if (tg && (!last || last.t === 'w' || nw === 0)) src = {w:tg.w, r:tg.r};
+      else if (last && last.t !== 'w' && tg && tg.w === last.w) src = {w:last.w, r:Math.max(tg.r, 1)};
       const had = en.sets.length;
       en.sets.push({w:src.w, r:src.r}); save(); render();
-      if (had && D.autoRest !== false) startRest();
       break;
     }
     case 'step': {
-      const x = s.entries[i].sets[j], f = t.dataset.f, d = +t.dataset.d; x[f] = Math.max(0, Math.round((x[f] + d)*100)/100); UI.last = {sid:s.id, i:i, j:j}; save(); render(); break;
+      const x = s.entries[i].sets[j], f = t.dataset.f, d = +t.dataset.d; x[f] = Math.max(0, Math.round((x[f] + d)*100)/100); UI.last = {sid:s.id, i:i, j:j}; save(); if (f === 'r') autoRest(s, i, j); render(); break;
     }
     case 'addex': openPicker(); break;
     case 'closepick': if (e.target === t) $('modalhost').innerHTML = ''; break;
@@ -665,11 +725,16 @@ document.addEventListener('click', e => {
       if (!n) { toast('Пока нет записанных подходов'); break; }
       const recs = [];
       s.entries.forEach(en => { const tp = topOf(en), k = kindOf(en.ex); if (tp && k !== 'assist' && k !== 'band') { const b = bestBefore(en.ex, en.gym || s.gym || 1, s.id); if (b && tp.v > b + 0.01) recs.push(en.ex.split(' (')[0]); } });
-      UI.rest = 0; clearInterval(tmr); $('timerhost').innerHTML = '';
+      UI.rest = 0; UI.pause = 0; UI.tmenu = false; clearInterval(tmr); tick();
+      s.done = true; save();
       UI.edit = null; UI.tab = 'hist'; render(); window.scrollTo(0,0);
       toast('Тренировка записана: подходов '+n+', поднято '+fmtN(tonnage(s))+' кг'+(recs.length ? '. Новые рекорды: '+recs.join(', ') : '')+' 💪', 6000); break;
     }
-    case 'timerstop': UI.rest = 0; clearInterval(tmr); $('timerhost').innerHTML = ''; break;
+    case 'timerstart': startRest(); break;
+    case 'timermenu': UI.tmenu = !UI.tmenu; tick(); break;
+    case 'timeradd': if (UI.pause) UI.pause += 15000; else if (UI.rest > 0) UI.rest += 15000; tick(); break;
+    case 'timerpause': if (UI.pause) { UI.rest = Date.now() + UI.pause; UI.pause = 0; clearInterval(tmr); tmr = setInterval(tick, 250); } else if (UI.rest > 0) { UI.pause = Math.max(1000, UI.rest - Date.now()); clearInterval(tmr); } tick(); break;
+    case 'timerstop': UI.rest = 0; UI.pause = 0; UI.tmenu = false; clearInterval(tmr); tick(); break;
   }
 });
 document.addEventListener('change', e => {
@@ -687,7 +752,7 @@ document.addEventListener('change', e => {
   const i = +t.dataset.i, en = s.entries[i];
   if (t.dataset.f === 'note') { en.note = t.value; save(); return; }
   const j = +t.dataset.j, f = t.dataset.f; if (!en.sets[j]) return;
-  en.sets[j][f] = num(t.value); UI.last = {sid:s.id, i:i, j:j}; save();
+  en.sets[j][f] = num(t.value); UI.last = {sid:s.id, i:i, j:j}; save(); if (f === 'r') autoRest(s, i, j);
   const top = topOf(en), g = en.gym||s.gym||1, k = kindOf(en.ex);
   if (top && f === 'r' && en.sets[j].t !== 'w' && k !== 'assist' && k !== 'band') { const b = bestBefore(en.ex, g, s.id); if (b && top.v > b + 0.01) toast('🏆 Новый рекорд: '+top.txt); }
   render();
