@@ -1,5 +1,5 @@
 // Офлайн-кэш: сначала сеть (чтобы подтягивались обновления), если сети нет — кэш.
-const CACHE = 'gymlog-v5';
+const CACHE = 'gymlog-v6';
 const FILES = ['./', 'index.html', 'exdb.js', 'exvideo.js', 'coach.js', 'body.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

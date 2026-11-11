@@ -435,5 +435,6 @@ const COACH = (function () {
     return {level: level, text: text, wmin: wmin, dayKcal: dayKcal};
   }
 
+  window.COACH_V = 3;
   return {fmt, CARDIO, kcalPerMin, cardioAdvice, stepFor, shiftDay, daysBetween, mondayOf, roundTo, e1, predReps, classOf, defaultStep, rangeFor, learnStep, noteFlags, gapTier, plan, setAdvice, AREAS, AREA_TIPS, affects, painAdvice, painWarnFor, deloadStatus, weightAdvice, sleepAdvice};
 })();

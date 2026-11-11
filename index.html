@@ -214,13 +214,18 @@ function curSession() { return UI.edit ? findS(UI.edit) : D.sessions.find(s => s
 function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === UI.tab));
   let h = '';
-  if (UI.edit) h = editorView(findS(UI.edit), true);
-  else if (UI.tab === 'today') { const s = D.sessions.find(x => x.date === todayStr() && !x.done); h = s ? editorView(s, false) : startView(); }
-  else if (UI.tab === 'hist') h = histView();
-  else if (UI.tab === 'base') h = baseView();
-  else if (UI.tab === 'prog') h = progView();
-  else if (UI.tab === 'body') h = bodyView();
-  else h = moreView();
+  try {
+    if (window.COACH_V !== 3 || window.BODY_V !== 3) throw new Error('версии файлов не совпадают (coach.js=' + window.COACH_V + ', body.js=' + window.BODY_V + '): на GitHub загружены не все 4 файла или кэш старый');
+    if (UI.edit) h = editorView(findS(UI.edit), true);
+    else if (UI.tab === 'today') { const s = D.sessions.find(x => x.date === todayStr() && !x.done); h = s ? editorView(s, false) : startView(); }
+    else if (UI.tab === 'hist') h = histView();
+    else if (UI.tab === 'base') h = baseView();
+    else if (UI.tab === 'prog') h = progView();
+    else if (UI.tab === 'body') h = bodyView();
+    else h = moreView();
+  } catch (err) {
+    h = '<div class="banner"><b>Ошибка при показе экрана.</b> Данные не потеряны. Сообщите разработчику этот текст:<br><code>' + esc(String(err && err.message || err)) + ' · ' + esc(String(err && err.stack || '').split('\n').slice(0, 3).join(' | ')) + '</code><br>Попробуйте закрыть приложение и открыть заново (обновятся файлы).</div>';
+  }
   $('view').innerHTML = (saveFail ? '<div class="banner">Не удалось сохранить на телефоне (приватный режим или нет места). Сделайте резервную копию во вкладке «Ещё».</div>' : '') + h;
   const inWorkout = !!UI.edit || (UI.tab === 'today' && D.sessions.some(x => x.date === todayStr() && !x.done));
   $('timerhost').style.display = inWorkout ? '' : 'none';
